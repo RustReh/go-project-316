@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -66,6 +67,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int) pag
 	if err != nil {
 		entry.Status = pageStatusError
 		entry.Error = err.Error()
+		entry.DiscoveredAt = time.Now().UTC()
 		return entry
 	}
 
@@ -80,6 +82,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int) pag
 			case <-ctx.Done():
 				entry.Status = pageStatusError
 				entry.Error = ctx.Err().Error()
+				entry.DiscoveredAt = time.Now().UTC()
 				return entry
 			case <-time.After(opts.Delay):
 			}
@@ -93,19 +96,69 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int) pag
 	if err != nil {
 		entry.Status = pageStatusError
 		entry.Error = err.Error()
+		entry.DiscoveredAt = time.Now().UTC()
 		return entry
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	_, _ = io.Copy(io.Discard, resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		entry.Status = pageStatusError
+		entry.Error = err.Error()
+		entry.HTTPStatus = resp.StatusCode
+		entry.DiscoveredAt = time.Now().UTC()
+		return entry
+	}
 
 	entry.HTTPStatus = resp.StatusCode
+	entry.DiscoveredAt = time.Now().UTC()
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		entry.Status = pageStatusOK
+		entry.BrokenLinks = findBrokenLinks(reqCtx, opts, pageURL, body)
 	} else {
 		entry.Status = pageStatusError
 		entry.Error = resp.Status
 	}
 
 	return entry
+}
+
+func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []byte) []brokenLink {
+	linkURLs, err := extractCheckableLinks(pageURL, bytes.NewReader(body))
+	if err != nil || len(linkURLs) == 0 {
+		return nil
+	}
+
+	var broken []brokenLink
+	for _, linkURL := range linkURLs {
+		if bl := checkLink(ctx, opts, linkURL); bl != nil {
+			broken = append(broken, *bl)
+		}
+	}
+
+	return broken
+}
+
+func checkLink(ctx context.Context, opts Options, linkURL string) *brokenLink {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, linkURL, nil)
+	if err != nil {
+		return &brokenLink{URL: linkURL, Error: err.Error()}
+	}
+	if opts.UserAgent != "" {
+		req.Header.Set("User-Agent", opts.UserAgent)
+	}
+
+	resp, err := opts.HTTPClient.Do(req)
+	if err != nil {
+		return &brokenLink{URL: linkURL, Error: err.Error()}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	_, _ = io.Copy(io.Discard, resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return &brokenLink{URL: linkURL, StatusCode: resp.StatusCode}
+	}
+
+	return nil
 }
