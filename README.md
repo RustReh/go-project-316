@@ -45,3 +45,11 @@ go run ./cmd/hexlet-go-crawler https://example.com
 | `bin/hexlet-go-crawler` | Собранный бинарник (`make build`) |
 
 HTTP-запросы выполняются только через `*http.Client` из `crawler.Options.HTTPClient` — это позволяет подменять клиент в тестах.
+
+## Тестирование
+
+Unit-тесты в `crawler/crawler_test.go` — пакет `crawler_test` (чёрный ящик): проверяются только вход `Analyze(ctx, opts)` и JSON на выходе. HTTP подменяется через `httptest.Server` или кастомный `http.Client.Transport`, без реальной сети.
+
+Покрыты сценарии: `200 OK`, `404`, `500`, таймаут, сетевой сбой.
+
+При push/PR автоматически запускается workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`go test -race`, golangci-lint). Hexlet-проверка — в `hexlet-check.yml`.
