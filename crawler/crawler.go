@@ -43,6 +43,7 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 	normalized := normalizePageURL(rootURL)
 	cache := newResourceCache()
 	pages := crawl(ctx, opts, rootURL, cache)
+	sort.Slice(pages, func(i, j int) bool { return pages[i].URL < pages[j].URL })
 
 	rep := Report{
 		RootURL:     normalized,
@@ -122,7 +123,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		// For successful page fetch, JSON fixtures expect arrays (even when empty).
 		entry.BrokenLinks = []BrokenLink{}
 		entry.Assets = []Asset{}
-		entry.BrokenLinks = findBrokenLinks(reqCtx, opts, pageURL, body, cache)
+		entry.BrokenLinks = findBrokenLinks(reqCtx, opts, pageURL, body, cache, rootHost)
 		entry.Assets = findAssets(reqCtx, opts, pageURL, body, cache)
 		internalLinks, _ = extractInternalLinks(pageURL, body, rootHost)
 	} else {
@@ -134,7 +135,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 	return entry, internalLinks
 }
 
-func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []byte, cache *resourceCache) []BrokenLink {
+func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []byte, cache *resourceCache, rootHost string) []BrokenLink {
 	linkURLs, err := extractCheckableLinks(pageURL, bytes.NewReader(body))
 	if err != nil || len(linkURLs) == 0 {
 		return []BrokenLink{}
@@ -142,6 +143,10 @@ func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []b
 
 	var broken []BrokenLink
 	for _, linkURL := range linkURLs {
+		u, err := url.Parse(linkURL)
+		if err != nil || !sameHost(u.Host, rootHost) {
+			continue
+		}
 		if bl := checkLink(ctx, opts, linkURL, cache); bl != nil {
 			broken = append(broken, *bl)
 		}
