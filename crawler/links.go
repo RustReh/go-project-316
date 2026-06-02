@@ -66,9 +66,6 @@ func linkAttrName(tag string) string {
 
 func normalizePageURL(u *url.URL) string {
 	u = cloneURL(u)
-	if u.Path == "" {
-		u.Path = "/"
-	}
 	u.Fragment = ""
 	u.User = nil
 	return u.String()

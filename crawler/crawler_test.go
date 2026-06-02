@@ -89,7 +89,7 @@ func TestAnalyze_HTTP_200OK(t *testing.T) {
 	rep := decodeReport(t, data)
 	page := rep.Pages[0]
 
-	wantRoot := srv.URL + "/"
+	wantRoot := srv.URL
 	if rep.RootURL != wantRoot {
 		t.Errorf("root_url = %q, want %q", rep.RootURL, wantRoot)
 	}
@@ -934,7 +934,7 @@ func TestAnalyze_JSONMatchesGolden(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	got, err := crawler.Analyze(context.Background(), crawler.Options{
-		URL:        srv.URL + "/",
+		URL:        srv.URL,
 		Depth:      1,
 		IndentJSON: true,
 		Now:        func() time.Time { return fixed },
@@ -945,12 +945,12 @@ func TestAnalyze_JSONMatchesGolden(t *testing.T) {
 	}
 
 	want := `{
-  "root_url": "` + srv.URL + `/",
+  "root_url": "` + srv.URL + `",
   "depth": 1,
   "generated_at": "2024-06-01T12:34:56Z",
   "pages": [
     {
-      "url": "` + srv.URL + `/",
+      "url": "` + srv.URL + `",
       "depth": 0,
       "http_status": 200,
       "status": "ok",
