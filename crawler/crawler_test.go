@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -637,4 +638,86 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return fn(req)
+}
+
+func TestAnalyze_retries_stopsAfterRetriesPlusOne(t *testing.T) {
+	t.Parallel()
+
+	var calls int
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			calls++
+			return &http.Response{
+				StatusCode: http.StatusInternalServerError,
+				Status:     "500 Internal Server Error",
+				Body:       io.NopCloser(strings.NewReader("<html></html>")),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	data, err := crawler.Analyze(context.Background(), crawler.Options{
+		URL:        "https://example.com",
+		Depth:      1,
+		Retries:    2,
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v, want nil (error goes into report)", err)
+	}
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3 (retries + 1)", calls)
+	}
+
+	page := decodeReport(t, data).Pages[0]
+	if page.HTTPStatus != http.StatusInternalServerError {
+		t.Errorf("http_status = %d, want 500", page.HTTPStatus)
+	}
+	if page.Status != "error" {
+		t.Errorf("status = %q, want error", page.Status)
+	}
+}
+
+func TestAnalyze_retries_succeedsOnSecondAttempt(t *testing.T) {
+	t.Parallel()
+
+	var calls int
+	client := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			calls++
+			code := http.StatusOK
+			status := "200 OK"
+			if calls == 1 {
+				code = http.StatusInternalServerError
+				status = "500 Internal Server Error"
+			}
+			return &http.Response{
+				StatusCode: code,
+				Status:     status,
+				Body:       io.NopCloser(strings.NewReader("<!DOCTYPE html><html><head><title>x</title></head><body></body></html>")),
+				Request:    req,
+			}, nil
+		}),
+	}
+
+	data, err := crawler.Analyze(context.Background(), crawler.Options{
+		URL:        "https://example.com",
+		Depth:      1,
+		Retries:    1,
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v, want nil", err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2 (one retry)", calls)
+	}
+
+	page := decodeReport(t, data).Pages[0]
+	if page.HTTPStatus != http.StatusOK {
+		t.Errorf("http_status = %d, want 200", page.HTTPStatus)
+	}
+	if page.Status != "ok" {
+		t.Errorf("status = %q, want ok", page.Status)
+	}
 }

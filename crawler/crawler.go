@@ -82,22 +82,14 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		req.Header.Set("User-Agent", opts.UserAgent)
 	}
 
-	var resp *http.Response
-	for attempt := 0; attempt <= opts.Retries; attempt++ {
-		resp, err = doRequest(ctx, opts, req)
-		if err == nil {
-			break
-		}
-		if ctx.Err() != nil {
-			entry.Status = pageStatusError
-			entry.Error = ctx.Err().Error()
-			entry.DiscoveredAt = time.Now().UTC()
-			return entry, nil
-		}
-	}
+	resp, err := doRequestWithRetry(ctx, opts, req)
 	if err != nil {
 		entry.Status = pageStatusError
-		entry.Error = err.Error()
+		if ctx.Err() != nil {
+			entry.Error = ctx.Err().Error()
+		} else {
+			entry.Error = err.Error()
+		}
 		entry.DiscoveredAt = time.Now().UTC()
 		return entry, nil
 	}
@@ -154,7 +146,7 @@ func checkLink(ctx context.Context, opts Options, linkURL string) *brokenLink {
 		req.Header.Set("User-Agent", opts.UserAgent)
 	}
 
-	resp, err := doRequest(ctx, opts, req)
+	resp, err := doRequestWithRetry(ctx, opts, req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return &brokenLink{URL: linkURL, Error: ctx.Err().Error()}
