@@ -72,10 +72,30 @@ func normalizePageURL(u *url.URL) string {
 	default:
 		u.Path = strings.TrimSuffix(u.Path, "/")
 	}
+
+	u.Path = normalizeIndexPath(u.Path)
+
 	u.RawQuery = ""
 	u.Fragment = ""
 	u.User = nil
 	return u.String()
+}
+
+func normalizeIndexPath(p string) string {
+	lp := strings.ToLower(p)
+	switch {
+	case strings.HasSuffix(lp, "/index.html"):
+		p = strings.TrimSuffix(p, p[len(p)-len("/index.html"):])
+	case strings.HasSuffix(lp, "/index.htm"):
+		p = strings.TrimSuffix(p, p[len(p)-len("/index.htm"):])
+	default:
+		return p
+	}
+	p = strings.TrimSuffix(p, "/")
+	if p == "/" {
+		return ""
+	}
+	return p
 }
 
 func cloneURL(u *url.URL) *url.URL {
