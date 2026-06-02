@@ -30,7 +30,7 @@ func main() {
 			},
 			&cli.DurationFlag{
 				Name:  "delay",
-				Usage: "delay between requests (example: 200ms, 1s)",
+				Usage: "minimum interval between any HTTP requests (example: 200ms); ignored when --rps is set",
 			},
 			&cli.DurationFlag{
 				Name:  "timeout",
@@ -39,7 +39,7 @@ func main() {
 			},
 			&cli.Float64Flag{
 				Name:  "rps",
-				Usage: "limit requests per second (overrides delay)",
+				Usage: "target requests per second for the whole crawl (overrides --delay)",
 			},
 			&cli.StringFlag{
 				Name:  "user-agent",
@@ -55,7 +55,7 @@ func main() {
 	}
 
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }

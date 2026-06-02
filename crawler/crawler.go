@@ -32,6 +32,7 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 		maxDepth = 1
 	}
 	opts.Depth = maxDepth
+	opts.requestLimiter = newRequestLimiter(opts)
 
 	normalized := normalizePageURL(rootURL)
 	pages := crawl(ctx, opts, rootURL)
@@ -83,20 +84,15 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 
 	var resp *http.Response
 	for attempt := 0; attempt <= opts.Retries; attempt++ {
-		if attempt > 0 && opts.Delay > 0 {
-			select {
-			case <-ctx.Done():
-				entry.Status = pageStatusError
-				entry.Error = ctx.Err().Error()
-				entry.DiscoveredAt = time.Now().UTC()
-				return entry, nil
-			case <-time.After(opts.Delay):
-			}
-		}
-
-		resp, err = opts.HTTPClient.Do(req)
+		resp, err = doRequest(ctx, opts, req)
 		if err == nil {
 			break
+		}
+		if ctx.Err() != nil {
+			entry.Status = pageStatusError
+			entry.Error = ctx.Err().Error()
+			entry.DiscoveredAt = time.Now().UTC()
+			return entry, nil
 		}
 	}
 	if err != nil {
@@ -158,8 +154,11 @@ func checkLink(ctx context.Context, opts Options, linkURL string) *brokenLink {
 		req.Header.Set("User-Agent", opts.UserAgent)
 	}
 
-	resp, err := opts.HTTPClient.Do(req)
+	resp, err := doRequest(ctx, opts, req)
 	if err != nil {
+		if ctx.Err() != nil {
+			return &brokenLink{URL: linkURL, Error: ctx.Err().Error()}
+		}
 		return &brokenLink{URL: linkURL, Error: err.Error()}
 	}
 	defer func() { _ = resp.Body.Close() }()
