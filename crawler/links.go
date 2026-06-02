@@ -72,6 +72,7 @@ func normalizePageURL(u *url.URL) string {
 	default:
 		u.Path = strings.TrimSuffix(u.Path, "/")
 	}
+	u.RawQuery = ""
 	u.Fragment = ""
 	u.User = nil
 	return u.String()
@@ -150,6 +151,7 @@ func resolveCheckableLink(base *url.URL, raw string) (*url.URL, bool) {
 		return nil, false
 	}
 
+	abs.RawQuery = ""
 	abs.Fragment = ""
 	abs.User = nil
 
