@@ -14,11 +14,11 @@ type pageEntry struct {
 	Depth        int          `json:"depth"`
 	HTTPStatus   int          `json:"http_status"`
 	Status       string       `json:"status"`
-	Error        string       `json:"error,omitempty"`
-	BrokenLinks  []brokenLink `json:"broken_links,omitempty"`
-	Assets       []assetEntry `json:"assets,omitempty"`
-	DiscoveredAt time.Time    `json:"discovered_at"`
+	Error        string       `json:"error"`
 	SEO          seoInfo      `json:"seo"`
+	BrokenLinks  []brokenLink `json:"broken_links"`
+	Assets       []assetEntry `json:"assets"`
+	DiscoveredAt time.Time    `json:"discovered_at"`
 }
 
 type seoInfo struct {
@@ -31,8 +31,8 @@ type seoInfo struct {
 
 type brokenLink struct {
 	URL        string `json:"url"`
-	StatusCode int    `json:"status_code,omitempty"`
-	Error      string `json:"error,omitempty"`
+	StatusCode int    `json:"status_code"`
+	Error      string `json:"error"`
 }
 
 type assetEntry struct {

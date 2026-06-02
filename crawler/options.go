@@ -21,6 +21,9 @@ type Options struct {
 	Concurrency int
 	IndentJSON  bool
 	HTTPClient  *http.Client
+	// Now allows tests to control timestamps in the JSON report.
+	// If nil, time.Now is used.
+	Now func() time.Time
 
 	requestLimiter *requestLimiter
 }

@@ -16,9 +16,10 @@ import (
 
 // Black-box JSON shapes — only public contract of Analyze(), no internal types.
 type crawlReport struct {
-	RootURL string      `json:"root_url"`
-	Depth   int         `json:"depth"`
-	Pages   []crawlPage `json:"pages"`
+	RootURL     string      `json:"root_url"`
+	Depth       int         `json:"depth"`
+	GeneratedAt string      `json:"generated_at"`
+	Pages       []crawlPage `json:"pages"`
 }
 
 type crawlPage struct {
@@ -289,8 +290,8 @@ func TestAnalyze_brokenLinks_onlyBrokenReported(t *testing.T) {
 	if bl.StatusCode != http.StatusNotFound {
 		t.Errorf("status_code = %d, want 404", bl.StatusCode)
 	}
-	if bl.Error != "" {
-		t.Errorf("error = %q, want empty for HTTP 404", bl.Error)
+	if bl.Error == "" {
+		t.Error("error is empty, want HTTP status text for 404")
 	}
 
 	for _, link := range page.BrokenLinks {
@@ -890,4 +891,152 @@ func TestAnalyze_assets_errorStatusIncluded(t *testing.T) {
 		t.Error("error is empty, want HTTP status text")
 	}
 	// size_bytes must be present even on error; value may be 0.
+}
+
+func TestAnalyze_JSONMatchesGolden(t *testing.T) {
+	t.Parallel()
+
+	fixed := time.Date(2024, 6, 1, 12, 34, 56, 0, time.UTC)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!DOCTYPE html>
+<html>
+<head>
+  <title>Example title</title>
+  <meta name="description" content="Example description">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <h1>Hello</h1>
+  <a href="/missing">broken</a>
+  <img src="/static/logo.png">
+</body>
+</html>`))
+	})
+	mux.HandleFunc("/missing", func(w http.ResponseWriter, _ *http.Request) {
+		http.NotFound(w, nil)
+	})
+	mux.HandleFunc("/static/logo.png", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Length", "5")
+		_, _ = w.Write([]byte("12345"))
+	})
+	mux.HandleFunc("/static/app.css", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/css")
+		w.Header().Set("Content-Length", "2")
+		_, _ = w.Write([]byte("/*"))
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	got, err := crawler.Analyze(context.Background(), crawler.Options{
+		URL:        srv.URL + "/",
+		Depth:      1,
+		IndentJSON: true,
+		Now:        func() time.Time { return fixed },
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v, want nil", err)
+	}
+
+	want := `{
+  "root_url": "` + srv.URL + `/",
+  "depth": 1,
+  "generated_at": "2024-06-01T12:34:56Z",
+  "pages": [
+    {
+      "url": "` + srv.URL + `/",
+      "depth": 0,
+      "http_status": 200,
+      "status": "ok",
+      "error": "",
+      "seo": {
+        "has_title": true,
+        "title": "Example title",
+        "has_description": true,
+        "description": "Example description",
+        "has_h1": true
+      },
+      "broken_links": [
+        {
+          "url": "` + srv.URL + `/missing",
+          "status_code": 404,
+          "error": "404 Not Found"
+        }
+      ],
+      "assets": [
+        {
+          "url": "` + srv.URL + `/static/app.css",
+          "type": "style",
+          "status_code": 200,
+          "size_bytes": 2,
+          "error": ""
+        },
+        {
+          "url": "` + srv.URL + `/static/logo.png",
+          "type": "image",
+          "status_code": 200,
+          "size_bytes": 5,
+          "error": ""
+        }
+      ],
+      "discovered_at": "2024-06-01T12:34:56Z"
+    }
+  ]
+}`
+
+	if strings.TrimSpace(string(got)) != strings.TrimSpace(want) {
+		t.Fatalf("JSON mismatch\n--- got ---\n%s\n--- want ---\n%s\n", got, want)
+	}
+}
+
+func TestAnalyze_IndentJSON_changesOnlyFormatting(t *testing.T) {
+	t.Parallel()
+
+	fixed := time.Date(2024, 6, 1, 12, 34, 56, 0, time.UTC)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><head><title>x</title></head><body></body></html>`))
+	}))
+	t.Cleanup(srv.Close)
+
+	opts := crawler.Options{
+		URL:        srv.URL,
+		Depth:      1,
+		Retries:    0,
+		Now:        func() time.Time { return fixed },
+		HTTPClient: srv.Client(),
+	}
+
+	compact, err := crawler.Analyze(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Analyze(compact) error = %v", err)
+	}
+
+	opts.IndentJSON = true
+	pretty, err := crawler.Analyze(context.Background(), opts)
+	if err != nil {
+		t.Fatalf("Analyze(pretty) error = %v", err)
+	}
+
+	var a, b any
+	if err := json.Unmarshal(compact, &a); err != nil {
+		t.Fatalf("unmarshal compact: %v", err)
+	}
+	if err := json.Unmarshal(pretty, &b); err != nil {
+		t.Fatalf("unmarshal pretty: %v", err)
+	}
+	aj, _ := json.Marshal(a)
+	bj, _ := json.Marshal(b)
+	if string(aj) != string(bj) {
+		t.Fatalf("content differs between compact and pretty JSON")
+	}
+	if string(compact) == string(pretty) {
+		t.Fatalf("expected formatting difference between compact and pretty JSON")
+	}
 }

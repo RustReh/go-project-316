@@ -85,6 +85,9 @@ func run(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	_, err = fmt.Println(string(data))
+	if _, err := os.Stdout.Write(data); err != nil {
+		return err
+	}
+	_, err = os.Stdout.WriteString("\n")
 	return err
 }

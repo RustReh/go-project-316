@@ -27,6 +27,11 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 		return nil, fmt.Errorf("invalid URL: %q", opts.URL)
 	}
 
+	nowFn := opts.Now
+	if nowFn == nil {
+		nowFn = time.Now
+	}
+
 	maxDepth := opts.Depth
 	if maxDepth <= 0 {
 		maxDepth = 1
@@ -41,7 +46,7 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 	rep := report{
 		RootURL:     normalized,
 		Depth:       maxDepth,
-		GeneratedAt: time.Now().UTC(),
+		GeneratedAt: nowFn().UTC(),
 		Pages:       pages,
 	}
 
@@ -62,6 +67,8 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 	entry := pageEntry{
 		URL:   pageURL,
 		Depth: depth,
+		Error: "",
+		SEO:   seoInfo{},
 	}
 
 	reqCtx := ctx
@@ -75,7 +82,9 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 	if err != nil {
 		entry.Status = pageStatusError
 		entry.Error = err.Error()
-		entry.DiscoveredAt = time.Now().UTC()
+		entry.DiscoveredAt = reportTime(opts).UTC()
+		entry.BrokenLinks = []brokenLink{}
+		entry.Assets = []assetEntry{}
 		return entry, nil
 	}
 
@@ -91,7 +100,9 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		} else {
 			entry.Error = err.Error()
 		}
-		entry.DiscoveredAt = time.Now().UTC()
+		entry.DiscoveredAt = reportTime(opts).UTC()
+		entry.BrokenLinks = []brokenLink{}
+		entry.Assets = []assetEntry{}
 		return entry, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -101,12 +112,14 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		entry.Status = pageStatusError
 		entry.Error = err.Error()
 		entry.HTTPStatus = resp.StatusCode
-		entry.DiscoveredAt = time.Now().UTC()
+		entry.DiscoveredAt = reportTime(opts).UTC()
+		entry.BrokenLinks = []brokenLink{}
+		entry.Assets = []assetEntry{}
 		return entry, nil
 	}
 
 	entry.HTTPStatus = resp.StatusCode
-	entry.DiscoveredAt = time.Now().UTC()
+	entry.DiscoveredAt = reportTime(opts).UTC()
 	entry.SEO = extractSEO(body)
 
 	var internalLinks []string
@@ -118,6 +131,12 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 	} else {
 		entry.Status = pageStatusError
 		entry.Error = resp.Status
+	}
+	if entry.BrokenLinks == nil {
+		entry.BrokenLinks = []brokenLink{}
+	}
+	if entry.Assets == nil {
+		entry.Assets = []assetEntry{}
 	}
 
 	return entry, internalLinks
@@ -143,10 +162,10 @@ func checkLink(ctx context.Context, opts Options, linkURL string, cache *resourc
 	res := cache.GetOrFetch(ctx, opts, linkURL)
 
 	if res.Error != "" && res.StatusCode == 0 {
-		return &brokenLink{URL: linkURL, Error: res.Error}
+		return &brokenLink{URL: linkURL, StatusCode: 0, Error: res.Error}
 	}
 	if res.StatusCode >= 400 {
-		return &brokenLink{URL: linkURL, StatusCode: res.StatusCode}
+		return &brokenLink{URL: linkURL, StatusCode: res.StatusCode, Error: res.Error}
 	}
 	return nil
 }
@@ -169,4 +188,11 @@ func findAssets(ctx context.Context, opts Options, pageURL string, body []byte, 
 		})
 	}
 	return out
+}
+
+func reportTime(opts Options) time.Time {
+	if opts.Now != nil {
+		return opts.Now()
+	}
+	return time.Now()
 }

@@ -113,6 +113,63 @@ go run ./cmd/hexlet-go-crawler --rps 5 https://example.com
 
 Один и тот же ассет по полному URL запрашивается **только один раз** за запуск (используется кэш), даже если он встречается на разных страницах.
 
+## Формат JSON-отчёта
+
+Пример отчёта (все ключи присутствуют, даже если значения пустые):
+
+```json
+{
+  "root_url": "https://example.com",
+  "depth": 1,
+  "generated_at": "2024-06-01T12:34:56Z",
+  "pages": [
+    {
+      "url": "https://example.com",
+      "depth": 0,
+      "http_status": 200,
+      "status": "ok",
+      "error": "",
+      "seo": {
+        "has_title": true,
+        "title": "Example title",
+        "has_description": true,
+        "description": "Example description",
+        "has_h1": true
+      },
+      "broken_links": [
+        {
+          "url": "https://example.com/missing",
+          "status_code": 404,
+          "error": "404 Not Found"
+        }
+      ],
+      "assets": [
+        {
+          "url": "https://example.com/static/logo.png",
+          "type": "image",
+          "status_code": 200,
+          "size_bytes": 12345,
+          "error": ""
+        }
+      ],
+      "discovered_at": "2024-06-01T12:34:56Z"
+    }
+  ]
+}
+```
+
+- **`root_url`**: стартовый URL.
+- **`depth`**: максимальная глубина обхода (см. раздел выше).
+- **`generated_at`**: время генерации отчёта (RFC3339/ISO8601).
+- **`pages`**: список страниц, каждая страница встречается не более одного раза.
+- **`pages[].depth`**: расстояние (число переходов) от `root_url`.
+- **`pages[].seo`**: базовые SEO-поля (`title`, `meta description`, наличие `h1`).
+- **`pages[].broken_links`**: ссылки, которые недоступны (HTTP 4xx/5xx или ошибка сети).
+- **`pages[].assets`**: найденные ассеты (изображения/скрипты/стили) с размерами.
+- **`discovered_at`**: время, когда страница была получена/обработана.
+
+Параметр `IndentJSON` влияет только на форматирование (пробелы/переносы строк), а содержимое остаётся тем же.
+
 ## Тестирование
 
 Unit-тесты в `crawler/crawler_test.go` — пакет `crawler_test` (чёрный ящик): проверяются только вход `Analyze(ctx, opts)` и JSON на выходе. HTTP подменяется через `httptest.Server` или кастомный `http.Client.Transport`, без реальной сети.
