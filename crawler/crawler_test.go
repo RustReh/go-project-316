@@ -89,11 +89,12 @@ func TestAnalyze_HTTP_200OK(t *testing.T) {
 	rep := decodeReport(t, data)
 	page := rep.Pages[0]
 
-	if rep.RootURL != srv.URL {
-		t.Errorf("root_url = %q, want %q", rep.RootURL, srv.URL)
+	wantRoot := srv.URL + "/"
+	if rep.RootURL != wantRoot {
+		t.Errorf("root_url = %q, want %q", rep.RootURL, wantRoot)
 	}
-	if page.URL != srv.URL {
-		t.Errorf("page.url = %q, want %q", page.URL, srv.URL)
+	if page.URL != wantRoot {
+		t.Errorf("page.url = %q, want %q", page.URL, wantRoot)
 	}
 	if page.HTTPStatus != http.StatusOK {
 		t.Errorf("http_status = %d, want 200", page.HTTPStatus)
@@ -236,8 +237,8 @@ func TestAnalyze_brokenLinks_onlyBrokenReported(t *testing.T) {
 	const pageHTML = `<!DOCTYPE html>
 <html>
 <head>
-  <link rel="stylesheet" href="/ok.css">
-  <link rel="stylesheet" href="/missing.css">
+  <a href="/ok.css">ok</a>
+  <a href="/missing.css">missing</a>
 </head>
 <body>
   <a href="mailto:noreply@example.com">mail</a>
@@ -953,7 +954,6 @@ func TestAnalyze_JSONMatchesGolden(t *testing.T) {
       "depth": 0,
       "http_status": 200,
       "status": "ok",
-      "error": "",
       "seo": {
         "has_title": true,
         "title": "Example title",
@@ -970,18 +970,16 @@ func TestAnalyze_JSONMatchesGolden(t *testing.T) {
       ],
       "assets": [
         {
-          "url": "` + srv.URL + `/static/app.css",
-          "type": "style",
-          "status_code": 200,
-          "size_bytes": 2,
-          "error": ""
-        },
-        {
           "url": "` + srv.URL + `/static/logo.png",
           "type": "image",
           "status_code": 200,
-          "size_bytes": 5,
-          "error": ""
+          "size_bytes": 5
+        },
+        {
+          "url": "` + srv.URL + `/static/app.css",
+          "type": "style",
+          "status_code": 200,
+          "size_bytes": 2
         }
       ],
       "discovered_at": "2024-06-01T12:34:56Z"

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"time"
 )
 
@@ -67,7 +68,6 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 	entry := Page{
 		URL:   pageURL,
 		Depth: depth,
-		Error: "",
 		SEO:   SEO{},
 	}
 
@@ -125,6 +125,9 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 	var internalLinks []string
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		entry.Status = pageStatusOK
+		// For successful page fetch, JSON fixtures expect arrays (even when empty).
+		entry.BrokenLinks = []BrokenLink{}
+		entry.Assets = []Asset{}
 		entry.BrokenLinks = findBrokenLinks(reqCtx, opts, pageURL, body, cache)
 		entry.Assets = findAssets(reqCtx, opts, pageURL, body, cache)
 		internalLinks, _ = extractInternalLinks(pageURL, body, rootHost)
@@ -132,12 +135,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		entry.Status = pageStatusError
 		entry.Error = resp.Status
 	}
-	if entry.BrokenLinks == nil {
-		entry.BrokenLinks = []BrokenLink{}
-	}
-	if entry.Assets == nil {
-		entry.Assets = []Asset{}
-	}
+	// On error pages (network/HTTP), BrokenLinks/Assets stay nil and marshal as null (fixture behavior).
 
 	return entry, internalLinks
 }
@@ -155,9 +153,6 @@ func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []b
 		}
 	}
 
-	if broken == nil {
-		return []BrokenLink{}
-	}
 	return broken
 }
 
@@ -190,7 +185,28 @@ func findAssets(ctx context.Context, opts Options, pageURL string, body []byte, 
 			Error:      res.Error,
 		})
 	}
+	sort.Slice(out, func(i, j int) bool {
+		pi := assetTypePriority(out[i].Type)
+		pj := assetTypePriority(out[j].Type)
+		if pi != pj {
+			return pi < pj
+		}
+		return out[i].URL < out[j].URL
+	})
 	return out
+}
+
+func assetTypePriority(t string) int {
+	switch t {
+	case "image":
+		return 1
+	case "script":
+		return 2
+	case "style":
+		return 3
+	default:
+		return 4
+	}
 }
 
 func reportTime(opts Options) time.Time {

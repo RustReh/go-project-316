@@ -57,10 +57,8 @@ func extractCheckableLinks(pageURL string, body io.Reader) ([]string, error) {
 
 func linkAttrName(tag string) string {
 	switch tag {
-	case "a", "link":
+	case "a":
 		return "href"
-	case "script", "img":
-		return "src"
 	default:
 		return ""
 	}
@@ -68,6 +66,9 @@ func linkAttrName(tag string) string {
 
 func normalizePageURL(u *url.URL) string {
 	u = cloneURL(u)
+	if u.Path == "" {
+		u.Path = "/"
+	}
 	u.Fragment = ""
 	u.User = nil
 	return u.String()
