@@ -17,6 +17,15 @@ type pageEntry struct {
 	Error        string       `json:"error,omitempty"`
 	BrokenLinks  []brokenLink `json:"broken_links,omitempty"`
 	DiscoveredAt time.Time    `json:"discovered_at"`
+	SEO          seoInfo      `json:"seo"`
+}
+
+type seoInfo struct {
+	HasTitle       bool   `json:"has_title"`
+	Title          string `json:"title"`
+	HasDescription bool   `json:"has_description"`
+	Description    string `json:"description"`
+	HasH1          bool   `json:"has_h1"`
 }
 
 type brokenLink struct {

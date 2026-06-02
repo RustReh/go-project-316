@@ -27,6 +27,15 @@ type crawlPage struct {
 	Error        string          `json:"error"`
 	BrokenLinks  []brokenLinkOut `json:"broken_links"`
 	DiscoveredAt string          `json:"discovered_at"`
+	SEO          seoOut          `json:"seo"`
+}
+
+type seoOut struct {
+	HasTitle       bool   `json:"has_title"`
+	Title          string `json:"title"`
+	HasDescription bool   `json:"has_description"`
+	Description    string `json:"description"`
+	HasH1          bool   `json:"has_h1"`
 }
 
 type brokenLinkOut struct {
@@ -309,6 +318,93 @@ func TestAnalyze_brokenLinks_omittedWhenAllOK(t *testing.T) {
 	if len(page.BrokenLinks) != 0 {
 		t.Errorf("broken_links = %+v, want empty or omitted", page.BrokenLinks)
 	}
+}
+
+func TestAnalyze_SEO_allTagsPresent(t *testing.T) {
+	t.Parallel()
+
+	const pageHTML = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Example Test</title>
+  <meta name="description" content="Short summary">
+</head>
+<body><h1>Main Heading</h1></body>
+</html>`
+
+	page := analyzeHTMLPage(t, pageHTML)
+
+	if !page.SEO.HasTitle || page.SEO.Title != "Example Test" {
+		t.Errorf("title: has=%v text=%q, want has=true text=%q", page.SEO.HasTitle, page.SEO.Title, "Example Test")
+	}
+	if !page.SEO.HasDescription || page.SEO.Description != "Short summary" {
+		t.Errorf("description: has=%v text=%q, want has=true text=%q",
+			page.SEO.HasDescription, page.SEO.Description, "Short summary")
+	}
+	if !page.SEO.HasH1 {
+		t.Errorf("has_h1 = false, want true")
+	}
+}
+
+func TestAnalyze_SEO_tagsAbsent(t *testing.T) {
+	t.Parallel()
+
+	const pageHTML = `<!DOCTYPE html><html><body><p>no seo tags</p></body></html>`
+
+	page := analyzeHTMLPage(t, pageHTML)
+
+	if page.SEO.HasTitle || page.SEO.Title != "" {
+		t.Errorf("title: has=%v text=%q, want has=false text empty", page.SEO.HasTitle, page.SEO.Title)
+	}
+	if page.SEO.HasDescription || page.SEO.Description != "" {
+		t.Errorf("description: has=%v text=%q, want has=false text empty",
+			page.SEO.HasDescription, page.SEO.Description)
+	}
+	if page.SEO.HasH1 {
+		t.Errorf("has_h1 = true, want false")
+	}
+}
+
+func TestAnalyze_SEO_decodesHTMLEntities(t *testing.T) {
+	t.Parallel()
+
+	const pageHTML = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Tom &amp; Jerry</title>
+  <meta name="description" content="A &amp; B">
+</head>
+<body><h1>Hello &amp; World</h1></body>
+</html>`
+
+	page := analyzeHTMLPage(t, pageHTML)
+
+	if page.SEO.Title != "Tom & Jerry" {
+		t.Errorf("title = %q, want %q", page.SEO.Title, "Tom & Jerry")
+	}
+	if page.SEO.Description != "A & B" {
+		t.Errorf("description = %q, want %q", page.SEO.Description, "A & B")
+	}
+}
+
+func analyzeHTMLPage(t *testing.T, htmlDoc string) crawlPage {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(htmlDoc))
+	}))
+	t.Cleanup(srv.Close)
+
+	data, err := crawler.Analyze(context.Background(), crawler.Options{
+		URL:        srv.URL,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v, want nil", err)
+	}
+
+	return decodeReport(t, data).Pages[0]
 }
 
 func TestAnalyze_invalidURL(t *testing.T) {

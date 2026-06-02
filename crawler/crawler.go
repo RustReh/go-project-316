@@ -112,6 +112,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int) pag
 
 	entry.HTTPStatus = resp.StatusCode
 	entry.DiscoveredAt = time.Now().UTC()
+	entry.SEO = extractSEO(body)
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		entry.Status = pageStatusOK
