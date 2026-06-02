@@ -35,7 +35,8 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 	opts.requestLimiter = newRequestLimiter(opts)
 
 	normalized := normalizePageURL(rootURL)
-	pages := crawl(ctx, opts, rootURL)
+	cache := newResourceCache()
+	pages := crawl(ctx, opts, rootURL, cache)
 
 	rep := report{
 		RootURL:     normalized,
@@ -57,7 +58,7 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 	return data, nil
 }
 
-func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, rootHost string) (pageEntry, []string) {
+func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, rootHost string, cache *resourceCache) (pageEntry, []string) {
 	entry := pageEntry{
 		URL:   pageURL,
 		Depth: depth,
@@ -111,7 +112,8 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 	var internalLinks []string
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		entry.Status = pageStatusOK
-		entry.BrokenLinks = findBrokenLinks(reqCtx, opts, pageURL, body)
+		entry.BrokenLinks = findBrokenLinks(reqCtx, opts, pageURL, body, cache)
+		entry.Assets = findAssets(reqCtx, opts, pageURL, body, cache)
 		internalLinks, _ = extractInternalLinks(pageURL, body, rootHost)
 	} else {
 		entry.Status = pageStatusError
@@ -121,7 +123,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 	return entry, internalLinks
 }
 
-func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []byte) []brokenLink {
+func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []byte, cache *resourceCache) []brokenLink {
 	linkURLs, err := extractCheckableLinks(pageURL, bytes.NewReader(body))
 	if err != nil || len(linkURLs) == 0 {
 		return nil
@@ -129,7 +131,7 @@ func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []b
 
 	var broken []brokenLink
 	for _, linkURL := range linkURLs {
-		if bl := checkLink(ctx, opts, linkURL); bl != nil {
+		if bl := checkLink(ctx, opts, linkURL, cache); bl != nil {
 			broken = append(broken, *bl)
 		}
 	}
@@ -137,28 +139,34 @@ func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []b
 	return broken
 }
 
-func checkLink(ctx context.Context, opts Options, linkURL string) *brokenLink {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, linkURL, nil)
-	if err != nil {
-		return &brokenLink{URL: linkURL, Error: err.Error()}
-	}
-	if opts.UserAgent != "" {
-		req.Header.Set("User-Agent", opts.UserAgent)
-	}
+func checkLink(ctx context.Context, opts Options, linkURL string, cache *resourceCache) *brokenLink {
+	res := cache.GetOrFetch(ctx, opts, linkURL)
 
-	resp, err := doRequestWithRetry(ctx, opts, req)
-	if err != nil {
-		if ctx.Err() != nil {
-			return &brokenLink{URL: linkURL, Error: ctx.Err().Error()}
-		}
-		return &brokenLink{URL: linkURL, Error: err.Error()}
+	if res.Error != "" && res.StatusCode == 0 {
+		return &brokenLink{URL: linkURL, Error: res.Error}
 	}
-	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, resp.Body)
-
-	if resp.StatusCode >= 400 {
-		return &brokenLink{URL: linkURL, StatusCode: resp.StatusCode}
+	if res.StatusCode >= 400 {
+		return &brokenLink{URL: linkURL, StatusCode: res.StatusCode}
 	}
-
 	return nil
+}
+
+func findAssets(ctx context.Context, opts Options, pageURL string, body []byte, cache *resourceCache) []assetEntry {
+	assets, err := extractAssets(pageURL, body)
+	if err != nil || len(assets) == 0 {
+		return nil
+	}
+
+	out := make([]assetEntry, 0, len(assets))
+	for _, a := range assets {
+		res := cache.GetOrFetch(ctx, opts, a.URL)
+		out = append(out, assetEntry{
+			URL:        a.URL,
+			Type:       a.Type,
+			StatusCode: res.StatusCode,
+			SizeBytes:  res.SizeBytes,
+			Error:      res.Error,
+		})
+	}
+	return out
 }

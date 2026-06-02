@@ -28,6 +28,7 @@ type crawlPage struct {
 	Status       string          `json:"status"`
 	Error        string          `json:"error"`
 	BrokenLinks  []brokenLinkOut `json:"broken_links"`
+	Assets       []assetOut      `json:"assets"`
 	DiscoveredAt string          `json:"discovered_at"`
 	SEO          seoOut          `json:"seo"`
 }
@@ -43,6 +44,14 @@ type seoOut struct {
 type brokenLinkOut struct {
 	URL        string `json:"url"`
 	StatusCode int    `json:"status_code"`
+	Error      string `json:"error"`
+}
+
+type assetOut struct {
+	URL        string `json:"url"`
+	Type       string `json:"type"`
+	StatusCode int    `json:"status_code"`
+	SizeBytes  int64  `json:"size_bytes"`
 	Error      string `json:"error"`
 }
 
@@ -720,4 +729,165 @@ func TestAnalyze_retries_succeedsOnSecondAttempt(t *testing.T) {
 	if page.Status != "ok" {
 		t.Errorf("status = %q, want ok", page.Status)
 	}
+}
+
+func TestAnalyze_assets_cachedAcrossPages_singleRequest(t *testing.T) {
+	t.Parallel()
+
+	var assetCalls int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body>
+			<a href="/p2">p2</a>
+			<script src="/app.js"></script>
+		</body></html>`))
+	})
+	mux.HandleFunc("/p2", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body>
+			<script src="/app.js"></script>
+		</body></html>`))
+	})
+	mux.HandleFunc("/app.js", func(w http.ResponseWriter, _ *http.Request) {
+		assetCalls++
+		w.Header().Set("Content-Type", "application/javascript")
+		w.Header().Set("Content-Length", "4")
+		_, _ = w.Write([]byte("abcd"))
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	data, err := crawler.Analyze(context.Background(), crawler.Options{
+		URL:        srv.URL + "/",
+		Depth:      3,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v, want nil", err)
+	}
+
+	rep := decodeReport(t, data)
+	if len(rep.Pages) != 2 {
+		t.Fatalf("pages len = %d, want 2", len(rep.Pages))
+	}
+	if assetCalls != 1 {
+		t.Fatalf("assetCalls = %d, want 1 (cached by URL)", assetCalls)
+	}
+
+	for _, p := range rep.Pages {
+		if len(p.Assets) != 1 {
+			t.Fatalf("page %q assets len = %d, want 1", p.URL, len(p.Assets))
+		}
+		a := p.Assets[0]
+		if !strings.HasSuffix(a.URL, "/app.js") {
+			t.Fatalf("asset url = %q, want /app.js", a.URL)
+		}
+		if a.Type != "script" {
+			t.Errorf("asset type = %q, want script", a.Type)
+		}
+		if a.StatusCode != http.StatusOK {
+			t.Errorf("asset status_code = %d, want 200", a.StatusCode)
+		}
+		if a.SizeBytes != 4 {
+			t.Errorf("asset size_bytes = %d, want 4", a.SizeBytes)
+		}
+		if a.Error != "" {
+			t.Errorf("asset error = %q, want empty", a.Error)
+		}
+	}
+}
+
+func TestAnalyze_assets_sizeFromBodyWhenNoContentLength(t *testing.T) {
+	t.Parallel()
+
+	const css = "body{color:red}"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><head>
+			<link rel="stylesheet" href="/nolength.css">
+		</head><body></body></html>`))
+	})
+	mux.HandleFunc("/nolength.css", func(w http.ResponseWriter, _ *http.Request) {
+		// Do not set Content-Length: should be computed from body.
+		w.Header().Set("Content-Type", "text/css")
+		_, _ = w.Write([]byte(css))
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	data, err := crawler.Analyze(context.Background(), crawler.Options{
+		URL:        srv.URL + "/",
+		Depth:      2,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v, want nil", err)
+	}
+
+	page := decodeReport(t, data).Pages[0]
+	if len(page.Assets) != 1 {
+		t.Fatalf("assets len = %d, want 1", len(page.Assets))
+	}
+	a := page.Assets[0]
+	if a.Type != "style" {
+		t.Errorf("type = %q, want style", a.Type)
+	}
+	if a.StatusCode != http.StatusOK {
+		t.Errorf("status_code = %d, want 200", a.StatusCode)
+	}
+	if a.SizeBytes != int64(len(css)) {
+		t.Errorf("size_bytes = %d, want %d", a.SizeBytes, len(css))
+	}
+	if a.Error != "" {
+		t.Errorf("error = %q, want empty", a.Error)
+	}
+}
+
+func TestAnalyze_assets_errorStatusIncluded(t *testing.T) {
+	t.Parallel()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body>
+			<img src="/missing.png">
+		</body></html>`))
+	})
+	mux.HandleFunc("/missing.png", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "nope", http.StatusNotFound)
+	})
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	data, err := crawler.Analyze(context.Background(), crawler.Options{
+		URL:        srv.URL + "/",
+		Depth:      2,
+		HTTPClient: srv.Client(),
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v, want nil", err)
+	}
+
+	page := decodeReport(t, data).Pages[0]
+	if len(page.Assets) != 1 {
+		t.Fatalf("assets len = %d, want 1", len(page.Assets))
+	}
+	a := page.Assets[0]
+	if a.Type != "image" {
+		t.Errorf("type = %q, want image", a.Type)
+	}
+	if a.StatusCode != http.StatusNotFound {
+		t.Errorf("status_code = %d, want 404", a.StatusCode)
+	}
+	if a.Error == "" {
+		t.Error("error is empty, want HTTP status text")
+	}
+	// size_bytes must be present even on error; value may be 0.
 }

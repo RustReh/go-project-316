@@ -16,6 +16,7 @@ type pageEntry struct {
 	Status       string       `json:"status"`
 	Error        string       `json:"error,omitempty"`
 	BrokenLinks  []brokenLink `json:"broken_links,omitempty"`
+	Assets       []assetEntry `json:"assets,omitempty"`
 	DiscoveredAt time.Time    `json:"discovered_at"`
 	SEO          seoInfo      `json:"seo"`
 }
@@ -32,4 +33,12 @@ type brokenLink struct {
 	URL        string `json:"url"`
 	StatusCode int    `json:"status_code,omitempty"`
 	Error      string `json:"error,omitempty"`
+}
+
+type assetEntry struct {
+	URL        string `json:"url"`
+	Type       string `json:"type"`
+	StatusCode int    `json:"status_code"`
+	SizeBytes  int64  `json:"size_bytes"`
+	Error      string `json:"error"`
 }

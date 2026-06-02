@@ -10,7 +10,7 @@ type crawlTask struct {
 	depth int
 }
 
-func crawl(ctx context.Context, opts Options, root *url.URL) []pageEntry {
+func crawl(ctx context.Context, opts Options, root *url.URL, cache *resourceCache) []pageEntry {
 	rootURL := normalizePageURL(root)
 	rootHost := root.Host
 
@@ -26,7 +26,7 @@ func crawl(ctx context.Context, opts Options, root *url.URL) []pageEntry {
 		task := queue[0]
 		queue = queue[1:]
 
-		page, internalLinks := fetchPage(ctx, opts, task.url, task.depth, rootHost)
+		page, internalLinks := fetchPage(ctx, opts, task.url, task.depth, rootHost, cache)
 		pages = append(pages, page)
 
 		nextDepth := task.depth + 1
