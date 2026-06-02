@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -405,6 +406,219 @@ func analyzeHTMLPage(t *testing.T, htmlDoc string) crawlPage {
 	}
 
 	return decodeReport(t, data).Pages[0]
+}
+
+func TestAnalyze_depthLimit_onlyRoot(t *testing.T) {
+	t.Parallel()
+
+	site := newTestSite(t, map[string]string{
+		"/": `<!DOCTYPE html><html><body>
+			<a href="/child">child</a>
+		</body></html>`,
+		"/child": `<!DOCTYPE html><html><body><p>child</p></body></html>`,
+	})
+
+	rep := analyzeWithDepth(t, site, site.rootURL, 1)
+
+	if len(rep.Pages) != 1 {
+		t.Fatalf("pages len = %d, want 1 (only root at depth limit 1)", len(rep.Pages))
+	}
+	if rep.Pages[0].Depth != 0 {
+		t.Errorf("root depth = %d, want 0", rep.Pages[0].Depth)
+	}
+}
+
+func TestAnalyze_depthLimit_includesFirstLevel(t *testing.T) {
+	t.Parallel()
+
+	site := newTestSite(t, map[string]string{
+		"/": `<!DOCTYPE html><html><body>
+			<a href="/one">one</a>
+			<a href="/two">two</a>
+		</body></html>`,
+		"/one":  `<!DOCTYPE html><html><body><a href="/deep">deep</a></body></html>`,
+		"/two":  `<!DOCTYPE html><html><body><p>two</p></body></html>`,
+		"/deep": `<!DOCTYPE html><html><body><p>deep</p></body></html>`,
+	})
+
+	rep := analyzeWithDepth(t, site, site.rootURL, 2)
+
+	if len(rep.Pages) != 3 {
+		t.Fatalf("pages len = %d, want 3 (root + two children)", len(rep.Pages))
+	}
+
+	depths := pageDepths(rep.Pages)
+	oneURL := joinURL(site.rootURL, "one")
+	twoURL := joinURL(site.rootURL, "two")
+	deepURL := joinURL(site.rootURL, "deep")
+	if depths[oneURL] != 1 || depths[twoURL] != 1 {
+		t.Errorf("child depths = %v, want depth 1 for %q and %q", depths, oneURL, twoURL)
+	}
+	if _, crawled := depths[deepURL]; crawled {
+		t.Errorf("page %q must not be crawled when depth limit is 2", deepURL)
+	}
+}
+
+func TestAnalyze_externalLinkNotInPages(t *testing.T) {
+	t.Parallel()
+
+	external := "https://other.example.com/page"
+
+	site := newTestSite(t, map[string]string{
+		"/": `<!DOCTYPE html><html><body>
+			<a href="/inside">inside</a>
+			<a href="/also">also</a>
+			<a href="` + external + `">outside</a>
+		</body></html>`,
+		"/inside": `<!DOCTYPE html><html><body><p>inside</p></body></html>`,
+		"/also":   `<!DOCTYPE html><html><body><p>also</p></body></html>`,
+	})
+
+	rep := analyzeWithDepth(t, site, site.rootURL, 10)
+
+	for _, page := range rep.Pages {
+		if strings.Contains(page.URL, "other.example.com") {
+			t.Errorf("external URL %q must not appear in pages", page.URL)
+		}
+	}
+	if len(rep.Pages) != 3 {
+		t.Fatalf("pages len = %d, want 3 internal pages", len(rep.Pages))
+	}
+}
+
+func TestAnalyze_duplicateInternalLinksCrawledOnce(t *testing.T) {
+	t.Parallel()
+
+	site := newTestSite(t, map[string]string{
+		"/": `<!DOCTYPE html><html><body>
+			<a href="/dup">first</a>
+			<a href="/dup">second</a>
+		</body></html>`,
+		"/dup": `<!DOCTYPE html><html><body><p>dup</p></body></html>`,
+	})
+
+	rep := analyzeWithDepth(t, site, site.rootURL, 10)
+
+	dupCount := 0
+	for _, page := range rep.Pages {
+		if strings.HasSuffix(page.URL, "/dup") {
+			dupCount++
+		}
+	}
+	if dupCount != 1 {
+		t.Fatalf("/dup appeared %d times in pages, want 1", dupCount)
+	}
+}
+
+func TestAnalyze_contextCancellation_returnsPartialReport(t *testing.T) {
+	t.Parallel()
+
+	secondStarted := make(chan struct{})
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body><a href="/second">second</a></body></html>`))
+	})
+	mux.HandleFunc("/second", func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case <-secondStarted:
+		default:
+			close(secondStarted)
+		}
+		time.Sleep(2 * time.Second)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body>second</body></html>`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	site := &testSite{rootURL: srv.URL + "/", client: srv.Client()}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		<-secondStarted
+		cancel()
+	}()
+
+	data, err := crawler.Analyze(ctx, crawler.Options{
+		URL:        site.rootURL,
+		Depth:      10,
+		HTTPClient: site.client,
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v, want nil with partial report", err)
+	}
+
+	var rep crawlReport
+	if err := json.Unmarshal(data, &rep); err != nil {
+		t.Fatalf("report is not valid JSON: %v", err)
+	}
+	if len(rep.Pages) < 1 {
+		t.Fatal("expected at least root page in partial report")
+	}
+	if len(rep.Pages) > 2 {
+		t.Fatalf("pages len = %d, want at most 2 after cancellation", len(rep.Pages))
+	}
+}
+
+type testSite struct {
+	rootURL string
+	client  *http.Client
+	mux     *http.ServeMux
+	server  *httptest.Server
+}
+
+func newTestSite(t *testing.T, pages map[string]string) *testSite {
+	t.Helper()
+
+	mux := http.NewServeMux()
+	for path, htmlDoc := range pages {
+		path := path
+		htmlDoc := htmlDoc
+		mux.HandleFunc(path, func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte(htmlDoc))
+		})
+	}
+
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	return &testSite{
+		rootURL: srv.URL + "/",
+		client:  srv.Client(),
+		mux:     mux,
+		server:  srv,
+	}
+}
+
+func analyzeWithDepth(t *testing.T, site *testSite, startURL string, depth int) crawlReport {
+	t.Helper()
+
+	data, err := crawler.Analyze(context.Background(), crawler.Options{
+		URL:        startURL,
+		Depth:      depth,
+		HTTPClient: site.client,
+	})
+	if err != nil {
+		t.Fatalf("Analyze() error = %v", err)
+	}
+
+	return decodeReport(t, data)
+}
+
+func joinURL(base, path string) string {
+	return strings.TrimSuffix(base, "/") + "/" + strings.TrimPrefix(path, "/")
+}
+
+func pageDepths(pages []crawlPage) map[string]int {
+	out := make(map[string]int, len(pages))
+	for _, p := range pages {
+		out[p.URL] = p.Depth
+	}
+	return out
 }
 
 func TestAnalyze_invalidURL(t *testing.T) {

@@ -16,7 +16,7 @@ const (
 	pageStatusError = "error"
 )
 
-// Analyze fetches the root URL and returns a JSON crawl report.
+// Analyze fetches pages up to the configured depth and returns a JSON crawl report.
 func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 	if opts.HTTPClient == nil {
 		return nil, fmt.Errorf("HTTPClient is required")
@@ -27,14 +27,20 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 		return nil, fmt.Errorf("invalid URL: %q", opts.URL)
 	}
 
-	normalized := rootURL.String()
-	page := fetchPage(ctx, opts, normalized, 0)
+	maxDepth := opts.Depth
+	if maxDepth <= 0 {
+		maxDepth = 1
+	}
+	opts.Depth = maxDepth
+
+	normalized := normalizePageURL(rootURL)
+	pages := crawl(ctx, opts, rootURL)
 
 	rep := report{
 		RootURL:     normalized,
-		Depth:       opts.Depth,
+		Depth:       maxDepth,
 		GeneratedAt: time.Now().UTC(),
-		Pages:       []pageEntry{page},
+		Pages:       pages,
 	}
 
 	var data []byte
@@ -50,7 +56,7 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 	return data, nil
 }
 
-func fetchPage(ctx context.Context, opts Options, pageURL string, depth int) pageEntry {
+func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, rootHost string) (pageEntry, []string) {
 	entry := pageEntry{
 		URL:   pageURL,
 		Depth: depth,
@@ -68,7 +74,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int) pag
 		entry.Status = pageStatusError
 		entry.Error = err.Error()
 		entry.DiscoveredAt = time.Now().UTC()
-		return entry
+		return entry, nil
 	}
 
 	if opts.UserAgent != "" {
@@ -83,7 +89,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int) pag
 				entry.Status = pageStatusError
 				entry.Error = ctx.Err().Error()
 				entry.DiscoveredAt = time.Now().UTC()
-				return entry
+				return entry, nil
 			case <-time.After(opts.Delay):
 			}
 		}
@@ -97,7 +103,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int) pag
 		entry.Status = pageStatusError
 		entry.Error = err.Error()
 		entry.DiscoveredAt = time.Now().UTC()
-		return entry
+		return entry, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -107,22 +113,24 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int) pag
 		entry.Error = err.Error()
 		entry.HTTPStatus = resp.StatusCode
 		entry.DiscoveredAt = time.Now().UTC()
-		return entry
+		return entry, nil
 	}
 
 	entry.HTTPStatus = resp.StatusCode
 	entry.DiscoveredAt = time.Now().UTC()
 	entry.SEO = extractSEO(body)
 
+	var internalLinks []string
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 		entry.Status = pageStatusOK
 		entry.BrokenLinks = findBrokenLinks(reqCtx, opts, pageURL, body)
+		internalLinks, _ = extractInternalLinks(pageURL, body, rootHost)
 	} else {
 		entry.Status = pageStatusError
 		entry.Error = resp.Status
 	}
 
-	return entry
+	return entry, internalLinks
 }
 
 func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []byte) []brokenLink {
