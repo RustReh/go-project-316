@@ -237,8 +237,8 @@ func TestAnalyze_brokenLinks_onlyBrokenReported(t *testing.T) {
 	const pageHTML = `<!DOCTYPE html>
 <html>
 <head>
-  <a href="/ok.css">ok</a>
-  <a href="/missing.css">missing</a>
+  <a href="/ok.html">ok</a>
+  <a href="/missing.html">missing</a>
 </head>
 <body>
   <a href="mailto:noreply@example.com">mail</a>
@@ -253,10 +253,10 @@ func TestAnalyze_brokenLinks_onlyBrokenReported(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(pageHTML))
 	})
-	mux.HandleFunc("/ok.css", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/ok.html", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	mux.HandleFunc("/missing.css", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/missing.html", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	})
 
@@ -284,7 +284,7 @@ func TestAnalyze_brokenLinks_onlyBrokenReported(t *testing.T) {
 	}
 
 	bl := page.BrokenLinks[0]
-	wantURL := srv.URL + "/missing.css"
+	wantURL := srv.URL + "/missing.html"
 	if bl.URL != wantURL {
 		t.Errorf("broken url = %q, want %q", bl.URL, wantURL)
 	}
@@ -296,7 +296,7 @@ func TestAnalyze_brokenLinks_onlyBrokenReported(t *testing.T) {
 	}
 
 	for _, link := range page.BrokenLinks {
-		if link.URL == srv.URL+"/ok.css" {
+		if link.URL == srv.URL+"/ok.html" {
 			t.Errorf("working link %q must not be in broken_links", link.URL)
 		}
 	}

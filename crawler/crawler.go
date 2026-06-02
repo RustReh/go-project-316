@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"sort"
 	"time"
 )
@@ -147,6 +148,9 @@ func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []b
 		if err != nil || !sameHost(u.Host, rootHost) {
 			continue
 		}
+		if !isLikelyPageLink(u) {
+			continue
+		}
 		if bl := checkLink(ctx, opts, linkURL, cache); bl != nil {
 			broken = append(broken, *bl)
 		}
@@ -156,6 +160,20 @@ func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []b
 		return []BrokenLink{}
 	}
 	return broken
+}
+
+func isLikelyPageLink(u *url.URL) bool {
+	// Assets are handled separately in the `assets` section; broken_links focuses on navigational links.
+	ext := path.Ext(u.Path)
+	if ext == "" || ext == "/" {
+		return true
+	}
+	switch ext {
+	case ".html", ".htm", ".xml":
+		return true
+	default:
+		return false
+	}
 }
 
 func checkLink(ctx context.Context, opts Options, linkURL string, cache *resourceCache) *BrokenLink {
