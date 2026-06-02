@@ -83,8 +83,6 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		entry.Status = pageStatusError
 		entry.Error = err.Error()
 		entry.DiscoveredAt = reportTime(opts).UTC()
-		entry.BrokenLinks = []BrokenLink{}
-		entry.Assets = []Asset{}
 		return entry, nil
 	}
 
@@ -101,8 +99,6 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 			entry.Error = err.Error()
 		}
 		entry.DiscoveredAt = reportTime(opts).UTC()
-		entry.BrokenLinks = []BrokenLink{}
-		entry.Assets = []Asset{}
 		return entry, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -113,8 +109,6 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		entry.Error = err.Error()
 		entry.HTTPStatus = resp.StatusCode
 		entry.DiscoveredAt = reportTime(opts).UTC()
-		entry.BrokenLinks = []BrokenLink{}
-		entry.Assets = []Asset{}
 		return entry, nil
 	}
 
@@ -153,6 +147,9 @@ func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []b
 		}
 	}
 
+	if broken == nil {
+		return []BrokenLink{}
+	}
 	return broken
 }
 
