@@ -2,26 +2,26 @@ package crawler
 
 import "time"
 
-type report struct {
-	RootURL     string      `json:"root_url"`
-	Depth       int         `json:"depth"`
-	GeneratedAt time.Time   `json:"generated_at"`
-	Pages       []pageEntry `json:"pages"`
+type Report struct {
+	RootURL     string    `json:"root_url"`
+	Depth       int       `json:"depth"`
+	GeneratedAt time.Time `json:"generated_at"`
+	Pages       []Page    `json:"pages"`
 }
 
-type pageEntry struct {
+type Page struct {
 	URL          string       `json:"url"`
 	Depth        int          `json:"depth"`
 	HTTPStatus   int          `json:"http_status"`
 	Status       string       `json:"status"`
 	Error        string       `json:"error"`
-	SEO          seoInfo      `json:"seo"`
-	BrokenLinks  []brokenLink `json:"broken_links"`
-	Assets       []assetEntry `json:"assets"`
+	SEO          SEO          `json:"seo"`
+	BrokenLinks  []BrokenLink `json:"broken_links"`
+	Assets       []Asset      `json:"assets"`
 	DiscoveredAt time.Time    `json:"discovered_at"`
 }
 
-type seoInfo struct {
+type SEO struct {
 	HasTitle       bool   `json:"has_title"`
 	Title          string `json:"title"`
 	HasDescription bool   `json:"has_description"`
@@ -29,13 +29,13 @@ type seoInfo struct {
 	HasH1          bool   `json:"has_h1"`
 }
 
-type brokenLink struct {
+type BrokenLink struct {
 	URL        string `json:"url"`
 	StatusCode int    `json:"status_code"`
 	Error      string `json:"error"`
 }
 
-type assetEntry struct {
+type Asset struct {
 	URL        string `json:"url"`
 	Type       string `json:"type"`
 	StatusCode int    `json:"status_code"`

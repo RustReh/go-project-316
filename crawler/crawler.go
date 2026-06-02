@@ -43,7 +43,7 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 	cache := newResourceCache()
 	pages := crawl(ctx, opts, rootURL, cache)
 
-	rep := report{
+	rep := Report{
 		RootURL:     normalized,
 		Depth:       maxDepth,
 		GeneratedAt: nowFn().UTC(),
@@ -63,12 +63,12 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 	return data, nil
 }
 
-func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, rootHost string, cache *resourceCache) (pageEntry, []string) {
-	entry := pageEntry{
+func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, rootHost string, cache *resourceCache) (Page, []string) {
+	entry := Page{
 		URL:   pageURL,
 		Depth: depth,
 		Error: "",
-		SEO:   seoInfo{},
+		SEO:   SEO{},
 	}
 
 	reqCtx := ctx
@@ -83,8 +83,8 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		entry.Status = pageStatusError
 		entry.Error = err.Error()
 		entry.DiscoveredAt = reportTime(opts).UTC()
-		entry.BrokenLinks = []brokenLink{}
-		entry.Assets = []assetEntry{}
+		entry.BrokenLinks = []BrokenLink{}
+		entry.Assets = []Asset{}
 		return entry, nil
 	}
 
@@ -101,8 +101,8 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 			entry.Error = err.Error()
 		}
 		entry.DiscoveredAt = reportTime(opts).UTC()
-		entry.BrokenLinks = []brokenLink{}
-		entry.Assets = []assetEntry{}
+		entry.BrokenLinks = []BrokenLink{}
+		entry.Assets = []Asset{}
 		return entry, nil
 	}
 	defer func() { _ = resp.Body.Close() }()
@@ -113,8 +113,8 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		entry.Error = err.Error()
 		entry.HTTPStatus = resp.StatusCode
 		entry.DiscoveredAt = reportTime(opts).UTC()
-		entry.BrokenLinks = []brokenLink{}
-		entry.Assets = []assetEntry{}
+		entry.BrokenLinks = []BrokenLink{}
+		entry.Assets = []Asset{}
 		return entry, nil
 	}
 
@@ -133,53 +133,56 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		entry.Error = resp.Status
 	}
 	if entry.BrokenLinks == nil {
-		entry.BrokenLinks = []brokenLink{}
+		entry.BrokenLinks = []BrokenLink{}
 	}
 	if entry.Assets == nil {
-		entry.Assets = []assetEntry{}
+		entry.Assets = []Asset{}
 	}
 
 	return entry, internalLinks
 }
 
-func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []byte, cache *resourceCache) []brokenLink {
+func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []byte, cache *resourceCache) []BrokenLink {
 	linkURLs, err := extractCheckableLinks(pageURL, bytes.NewReader(body))
 	if err != nil || len(linkURLs) == 0 {
-		return nil
+		return []BrokenLink{}
 	}
 
-	var broken []brokenLink
+	var broken []BrokenLink
 	for _, linkURL := range linkURLs {
 		if bl := checkLink(ctx, opts, linkURL, cache); bl != nil {
 			broken = append(broken, *bl)
 		}
 	}
 
+	if broken == nil {
+		return []BrokenLink{}
+	}
 	return broken
 }
 
-func checkLink(ctx context.Context, opts Options, linkURL string, cache *resourceCache) *brokenLink {
+func checkLink(ctx context.Context, opts Options, linkURL string, cache *resourceCache) *BrokenLink {
 	res := cache.GetOrFetch(ctx, opts, linkURL)
 
 	if res.Error != "" && res.StatusCode == 0 {
-		return &brokenLink{URL: linkURL, StatusCode: 0, Error: res.Error}
+		return &BrokenLink{URL: linkURL, StatusCode: 0, Error: res.Error}
 	}
 	if res.StatusCode >= 400 {
-		return &brokenLink{URL: linkURL, StatusCode: res.StatusCode, Error: res.Error}
+		return &BrokenLink{URL: linkURL, StatusCode: res.StatusCode, Error: res.Error}
 	}
 	return nil
 }
 
-func findAssets(ctx context.Context, opts Options, pageURL string, body []byte, cache *resourceCache) []assetEntry {
+func findAssets(ctx context.Context, opts Options, pageURL string, body []byte, cache *resourceCache) []Asset {
 	assets, err := extractAssets(pageURL, body)
 	if err != nil || len(assets) == 0 {
-		return nil
+		return []Asset{}
 	}
 
-	out := make([]assetEntry, 0, len(assets))
+	out := make([]Asset, 0, len(assets))
 	for _, a := range assets {
 		res := cache.GetOrFetch(ctx, opts, a.URL)
-		out = append(out, assetEntry{
+		out = append(out, Asset{
 			URL:        a.URL,
 			Type:       a.Type,
 			StatusCode: res.StatusCode,

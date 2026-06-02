@@ -8,8 +8,8 @@ import (
 	"golang.org/x/net/html"
 )
 
-func extractSEO(body []byte) seoInfo {
-	info := seoInfo{}
+func extractSEO(body []byte) SEO {
+	info := SEO{}
 
 	doc, err := html.Parse(bytes.NewReader(body))
 	if err != nil {

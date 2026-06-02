@@ -10,13 +10,13 @@ type crawlTask struct {
 	depth int
 }
 
-func crawl(ctx context.Context, opts Options, root *url.URL, cache *resourceCache) []pageEntry {
+func crawl(ctx context.Context, opts Options, root *url.URL, cache *resourceCache) []Page {
 	rootURL := normalizePageURL(root)
 	rootHost := root.Host
 
 	queue := []crawlTask{{url: rootURL, depth: 0}}
 	visited := map[string]struct{}{rootURL: {}}
-	var pages []pageEntry
+	var pages []Page
 
 	for len(queue) > 0 {
 		if ctx.Err() != nil && len(pages) > 0 {
