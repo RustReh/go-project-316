@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -66,7 +67,7 @@ func Analyze(ctx context.Context, opts Options) ([]byte, error) {
 	return data, nil
 }
 
-func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, rootHost string, cache *resourceCache) (Page, []string) {
+func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, rootHost string, rootScheme string, cache *resourceCache) (Page, []string) {
 	entry := Page{
 		URL:   pageURL,
 		Depth: depth,
@@ -124,7 +125,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 		// For successful page fetch, JSON fixtures expect arrays (even when empty).
 		entry.BrokenLinks = []BrokenLink{}
 		entry.Assets = []Asset{}
-		entry.BrokenLinks = findBrokenLinks(reqCtx, opts, pageURL, body, cache, rootHost)
+		entry.BrokenLinks = findBrokenLinks(reqCtx, opts, pageURL, body, cache, rootHost, rootScheme)
 		entry.Assets = findAssets(reqCtx, opts, pageURL, body, cache)
 		internalLinks, _ = extractInternalLinks(pageURL, body, rootHost)
 	} else {
@@ -136,7 +137,7 @@ func fetchPage(ctx context.Context, opts Options, pageURL string, depth int, roo
 	return entry, internalLinks
 }
 
-func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []byte, cache *resourceCache, rootHost string) []BrokenLink {
+func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []byte, cache *resourceCache, rootHost string, rootScheme string) []BrokenLink {
 	linkURLs, err := extractCheckableLinks(pageURL, bytes.NewReader(body))
 	if err != nil || len(linkURLs) == 0 {
 		return []BrokenLink{}
@@ -145,7 +146,7 @@ func findBrokenLinks(ctx context.Context, opts Options, pageURL string, body []b
 	var broken []BrokenLink
 	for _, linkURL := range linkURLs {
 		u, err := url.Parse(linkURL)
-		if err != nil || !sameHost(u.Host, rootHost) {
+		if err != nil || !sameHost(u.Host, rootHost) || !strings.EqualFold(u.Scheme, rootScheme) {
 			continue
 		}
 		if !isLikelyPageLink(u) {

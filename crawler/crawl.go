@@ -13,6 +13,7 @@ type crawlTask struct {
 func crawl(ctx context.Context, opts Options, root *url.URL, cache *resourceCache) []Page {
 	rootURL := normalizePageURL(root)
 	rootHost := root.Host
+	rootScheme := root.Scheme
 
 	queue := []crawlTask{{url: rootURL, depth: 0}}
 	visited := map[string]struct{}{rootURL: {}}
@@ -26,7 +27,7 @@ func crawl(ctx context.Context, opts Options, root *url.URL, cache *resourceCach
 		task := queue[0]
 		queue = queue[1:]
 
-		page, internalLinks := fetchPage(ctx, opts, task.url, task.depth, rootHost, cache)
+		page, internalLinks := fetchPage(ctx, opts, task.url, task.depth, rootHost, rootScheme, cache)
 		pages = append(pages, page)
 
 		nextDepth := task.depth + 1
