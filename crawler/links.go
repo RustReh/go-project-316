@@ -36,7 +36,7 @@ func extractCheckableLinks(pageURL string, body io.Reader) ([]string, error) {
 				for _, a := range n.Attr {
 					if a.Key == attrName {
 						if abs, ok := resolveCheckableLink(base, a.Val); ok {
-							s := abs.String()
+							s := normalizePageURL(abs)
 							if _, exists := seen[s]; !exists {
 								seen[s] = struct{}{}
 								links = append(links, s)
@@ -66,8 +66,11 @@ func linkAttrName(tag string) string {
 
 func normalizePageURL(u *url.URL) string {
 	u = cloneURL(u)
-	if u.Path == "/" {
+	switch u.Path {
+	case "/":
 		u.Path = ""
+	default:
+		u.Path = strings.TrimSuffix(u.Path, "/")
 	}
 	u.Fragment = ""
 	u.User = nil

@@ -75,7 +75,7 @@ func addAsset(base *url.URL, n *html.Node, attr, typ string, seen map[string]str
 		if !ok {
 			return false
 		}
-		u := abs.String()
+		u := normalizePageURL(abs)
 		if _, exists := seen[u]; exists {
 			return false
 		}
