@@ -40,20 +40,39 @@ func (c *resourceCache) GetOrFetch(ctx context.Context, opts Options, url string
 }
 
 func fetchResource(ctx context.Context, opts Options, url string) resourceResult {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	// Prefer HEAD to avoid downloading bodies. Some servers return 405 for HEAD,
+	// so we fall back to GET in that case to keep results method-independent.
+	headReq, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
 	if err != nil {
 		return resourceResult{Error: err.Error()}
 	}
 	if opts.UserAgent != "" {
-		req.Header.Set("User-Agent", opts.UserAgent)
+		headReq.Header.Set("User-Agent", opts.UserAgent)
 	}
 
-	resp, err := doRequestWithRetry(ctx, opts, req)
+	resp, err := doRequestWithRetry(ctx, opts, headReq)
 	if err != nil {
 		if ctx.Err() != nil {
 			return resourceResult{Error: ctx.Err().Error()}
 		}
 		return resourceResult{Error: err.Error()}
+	}
+	if resp.StatusCode == http.StatusMethodNotAllowed {
+		_ = resp.Body.Close()
+		getReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return resourceResult{Error: err.Error()}
+		}
+		if opts.UserAgent != "" {
+			getReq.Header.Set("User-Agent", opts.UserAgent)
+		}
+		resp, err = doRequestWithRetry(ctx, opts, getReq)
+		if err != nil {
+			if ctx.Err() != nil {
+				return resourceResult{Error: ctx.Err().Error()}
+			}
+			return resourceResult{Error: err.Error()}
+		}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
