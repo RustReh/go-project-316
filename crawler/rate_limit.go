@@ -62,10 +62,15 @@ func (l *requestLimiter) Wait(ctx context.Context) error {
 	now := l.now()
 	var wait time.Duration
 	if !l.last.IsZero() {
-		elapsed := now.Sub(l.last)
-		if elapsed < l.interval {
-			wait = l.interval - elapsed
+		waitUntil := l.last.Add(l.interval)
+		if now.Before(waitUntil) {
+			wait = waitUntil.Sub(now)
+			l.last = waitUntil
+		} else {
+			l.last = now
 		}
+	} else {
+		l.last = now
 	}
 	l.mu.Unlock()
 
@@ -74,10 +79,6 @@ func (l *requestLimiter) Wait(ctx context.Context) error {
 			return err
 		}
 	}
-
-	l.mu.Lock()
-	l.last = l.now()
-	l.mu.Unlock()
 	return nil
 }
 
